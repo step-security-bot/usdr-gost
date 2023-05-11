@@ -13,7 +13,7 @@ exports.up = function (knex) {
             -- Create and index a column that materializes lexemes parsed from grants.description
             ALTER TABLE grants ADD COLUMN description_ts tsvector
                 GENERATED ALWAYS AS (to_tsvector('english', description)) STORED;
-            CREATE INDEX description_ts_idx_gin ON grants USING GIN (description);
+            CREATE INDEX description_ts_idx_gin ON grants USING GIN (description_ts);
         `,
     );
 };
