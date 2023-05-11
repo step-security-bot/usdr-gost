@@ -11,26 +11,33 @@ function whereAgencyCriteriaMatch(qb, criteria) {
         Ensures that if either description/grant_id/grant_number/title
         matches any of the include keywords we will include the grant.
     */
-    if (criteria.includeKeywords && criteria.includeKeywords.length > 0) {
-        qb.where((q) => q
-            .where('description', '~*', criteria.includeKeywords.join('|'))
-            .orWhere('grant_id', '~*', criteria.includeKeywords.join('|'))
-            .orWhere('grant_number', '~*', criteria.includeKeywords.join('|'))
-            .orWhere('title', '~*', criteria.includeKeywords.join('|')));
-    }
+    const includeKeywords = criteria.includeKeywords || [];
+    const excludeKeywords = criteria.excludeKeywords || [];
+    if (includeKeywords.length > 0 || excludeKeywords.length > 0) {
+        const tsqIncludes = includeKeywords.join(' | ');
+        const tsqExcludes = excludeKeywords.map(kw => `!${kw}`).join(' & ');
 
-    /*
-        Ensures that if either description/grant_id/grant_number/title
-        contains any of the exclude keywords we will exclude the grant.
+        let tsqExpression;
+        if (includeKeywords.length > 0 && excludeKeywords.length > 0) {
+            tsqExpression = `(${tsqIncludes}) & (${tsqExcludes})`;
+        } else if (includeKeywords.length > 0) {
+            tsqExpression = tsqIncludes;
+        } else {
+            tsqExpression = tsqExcludes;
+        }
+        qb.joinRaw(`to_tsquery(?) as tsq`, tsqExpression);
+        qb.where((q) => q.where('tsq', '@@', 'title_ts').orWhere('tsq', '@@', 'description_ts'));
 
-        TODO: figure out if this is what we actually want the behavior to look like.
-    */
-    if (criteria.excludeKeywords && criteria.excludeKeywords.length > 0) {
-        qb.where((q) => q
-            .where('description', '!~*', criteria.excludeKeywords.join('|'))
-            .andWhere('grant_id', '!~*', criteria.excludeKeywords.join('|'))
-            .andWhere('grant_number', '!~*', criteria.excludeKeywords.join('|'))
-            .andWhere('title', '!~*', criteria.excludeKeywords.join('|')));
+        if (includeKeywords.length > 0) {
+            qb.where((q) => q
+                .where('grant_number', '~*', includeKeywords.join('|'))
+                .orWhere('grant_id', '~*', includeKeywords.join('|')));
+        }
+        if (excludeKeywords.length > 0) {
+            qb.where((q) => q
+                .where('grant_id', '!~*', criteria.excludeKeywords.join('|'))
+                .andWhere('grant_number', '!~*', criteria.excludeKeywords.join('|')));
+        }
     }
 }
 
