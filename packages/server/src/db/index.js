@@ -382,12 +382,54 @@ async function getGrantsToString({
                 if (filters.assignedToAgency) {
                     queryBuilder.join(TABLES.assigned_grants_agency, `${TABLES.grants}.grant_id`, `${TABLES.assigned_grants_agency}.grant_id`);
                 }
+
+                const includeKeywords = filters.agencyCriteria.includeKeywords || [];
+                const excludeKeywords = filters.agencyCriteria.excludeKeywords || [];
+                if (includeKeywords.length > 1 || excludeKeywords.length > 1) {
+                    const tsqIncludes = includeKeywords.join(' | ');
+                    const tsqExcludes = excludeKeywords.map(kw => `!${kw}`).join(' & ');
+
+                    let tsqExpression;
+                    if (includeKeywords.length > 0 && excludeKeywords.length > 0) {
+                        tsqExpression = `(${tsqIncludes}) & (${tsqExcludes})`;
+                    } else if (includeKeywords.length > 0) {
+                        tsqExpression = tsqIncludes;
+                    } else {
+                        tsqExpression = tsqExcludes;
+                    }
+                    queryBuilder.joinRaw(`cross join to_tsquery('english', ?) as tsq`, tsqExpression);
+                    queryBuilder.andWhere((q) => {
+                        q.where('tsq', '@@', knex.raw('title_ts'))
+                            .orWhere('tsq', '@@', knex.raw('description_ts'));
+                        if (includeKeywords.length > 0) {
+                            q.orWhere('grant_number', '~*', includeKeywords.join('|'))
+                                .orWhere('grant_id', '~*', includeKeywords.join('|'));
+                        }
+                        return q;
+                    });
+                    if (excludeKeywords.length > 0) {
+                        queryBuilder.andWhere('grant_id', '!~*', excludeKeywords.join('|'))
+                            .andWhere('grant_number', '!~*', excludeKeywords.join('|'));
+                    }
+
+                    /*
+                    // Optional: To sort by relevance...
+                    queryBuilder.select(
+                        knex.raw(`ts_rank(title_ts, tsq) as rank_title`),
+                        knex.raw(`ts_rank(grants.description_ts, tsq) as rank_description`));
+                    queryBuilder.orderBy([
+                        {column: 'rank_title', order: 'desc'},
+                        {column: 'rank_description', order: 'desc'},
+                    ]);
+                    */
+                }
+
                 queryBuilder.andWhere(
                     (qb) => {
                         const isMyGrantsQuery = filters.interestedByAgency !== null
-                                                || filters.assignedToAgency !== null
-                                                || filters.rejected !== null
-                                                || filters.result !== null;
+                            || filters.assignedToAgency !== null
+                            || filters.rejected !== null
+                            || filters.result !== null;
                         if (!isMyGrantsQuery) {
                             helpers.whereAgencyCriteriaMatch(qb, filters.agencyCriteria);
                         }
@@ -509,9 +551,9 @@ async function getGrants({
                 queryBuilder.andWhere(
                     (qb) => {
                         const isMyGrantsQuery = filters.interestedByAgency !== null
-                                                || filters.assignedToAgency !== null
-                                                || filters.rejected !== null
-                                                || filters.result !== null;
+                            || filters.assignedToAgency !== null
+                            || filters.rejected !== null
+                            || filters.result !== null;
                         if (!isMyGrantsQuery) {
                             helpers.whereAgencyCriteriaMatch(qb, filters.agencyCriteria);
                         }
