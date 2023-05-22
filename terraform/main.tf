@@ -4,7 +4,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 4.65.0"
+      version = "~> 4.67.0"
     }
   }
 
@@ -59,7 +59,7 @@ module "website" {
 module "api_to_postgres_security_group" {
   enabled = var.api_enabled
   source  = "cloudposse/security-group/aws"
-  version = "2.0.1"
+  version = "2.1.0"
 
   namespace        = var.namespace
   vpc_id           = data.aws_ssm_parameter.vpc_id.value
