@@ -1,5 +1,6 @@
 const { ReceiveMessageCommand, DeleteMessageCommand } = require('@aws-sdk/client-sqs');
 const moment = require('moment');
+const log = require('./logging')('grants-ingest');
 
 const opportunityCategoryMap = {
     C: 'Continuation',
@@ -11,17 +12,22 @@ const opportunityCategoryMap = {
 
 function normalizeDateString(dateString, formats = ['YYYY-MM-DD', 'MMDDYYYY']) {
     const target = 'YYYY-MM-DD';
+    const thisLog = log.child({ target, formats, input: dateString });
+
     for (const fmt of formats) {
         const parsed = moment(dateString, fmt, true);
         if (parsed.isValid()) {
             const result = parsed.format(target);
-            if (result !== dateString) {
-                console.log(`Input date string ${dateString} normalized to ${result}`);
-            }
-            console.log(`Input date string ${dateString} already in target format ${target}`);
+            thisLog.info(
+                { inputFormat: fmt },
+                dateString !== result
+                    ? 'Normalized date string'
+                    : 'Input date string already in target format',
+            );
             return result;
         }
-        console.log(`Failed to parse value ${dateString} as date using format ${fmt}`);
+        thisLog.warn({ attemptedFormat: fmt },
+            'Failed to parse value input date string as date using format');
     }
     throw new Error(`Value ${dateString} could not be parsed from formats ${formats.join(', ')}`);
 }
@@ -41,7 +47,7 @@ async function receiveNextMessageBatch(sqs, queueUrl) {
 
     const messages = (resp && resp.Messages) ? resp.Messages : [];
     if (messages.length === 0) {
-        console.log('Empty message batch received from SQS');
+        log.info({ queueUrl }, 'Empty message batch received from SQS');
     }
     return messages;
 }
@@ -104,49 +110,52 @@ async function deleteMessage(sqs, queueUrl, receiptHandle) {
  * @param { Array[import('@aws-sdk/client-sqs').Message] } messages Messages to process from SQS.
  */
 async function processMessages(knex, sqs, queueUrl, messages) {
-    let grantParseErrorCount = 0;
-    let grantSaveSuccessCount = 0;
-    let grantSaveErrorCount = 0;
+    let parseErrorCount = 0;
+    let successCount = 0;
+    let saveErrorCount = 0;
 
     return Promise.all(messages.map(async (message) => {
-        console.log('Processing message:', message.Body);
+        const sqsLogFields = { receiptHandle: message.ReceiptHandle, messageId: message.MessageId };
+        let thisLog = log.child({ sqsMessage: sqsLogFields });
+        thisLog.info({ sqsMessage: { body: message.Body, ...sqsLogFields } }, 'Procesing message');
 
         let grant;
         try {
             grant = sqsMessageToGrant(message.Body);
         } catch (e) {
-            grantParseErrorCount += 1;
-            console.error('Error parsing grant from SQS message:', e);
+            parseErrorCount += 1;
+            thisLog.error(e, 'Error parsing grant from SQS message');
             return;
         }
+        thisLog = thisLog.child({ grant_id: grant.grant_id });
 
         try {
             await upsertGrant(knex, grant);
-            grantSaveSuccessCount += 1;
+            successCount += 1;
         } catch (e) {
-            grantSaveErrorCount += 1;
-            console.error(`Error on insert/update row with grant_id ${grant.grant_id}:`, e);
+            saveErrorCount += 1;
+            thisLog.error(e, 'Error on grant insert/update');
             return;
         }
 
         try {
             await deleteMessage(sqs, queueUrl, message.ReceiptHandle);
         } catch (e) {
-            console.log(
-                `Error deleting SQS message with receipt handle ${message.ReceiptHandle} `,
-                `for grant ${grant.grant_id}`,
-            );
+            thisLog.error(e, 'Error deleting SQS message');
             throw e;
         }
 
-        console.log(`Processing completed successfully for grant ${grant.grant_id}`);
+        thisLog.info('Processing completed successfully');
     })).then(() => {
-        console.log(
-            'Finished processing messages with the following results: ',
-            `Grants Saved Successfully: ${grantSaveSuccessCount}`,
-            `| Parsing Errors: ${grantParseErrorCount}`,
-            `| Postgres Errors: ${grantSaveErrorCount}`,
-        );
+        const hasErrors = parseErrorCount + saveErrorCount > 0;
+        const logData = {
+            msg: 'Finished processing SQS messages',
+            withErrors: hasErrors,
+            totals: {
+                success: successCount, parseErrors: parseErrorCount, saveErrors: saveErrorCount,
+            },
+        };
+        hasErrors ? log.warn(logData) : log.info(logData);
     });
 }
 
