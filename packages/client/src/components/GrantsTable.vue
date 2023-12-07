@@ -69,7 +69,7 @@ import { mapActions, mapGetters } from 'vuex';
 import { debounce } from 'lodash';
 import Multiselect from 'vue-multiselect';
 import { titleize } from '../helpers/form-helpers';
-import GrantDetails from './Modals/GrantDetails.vue';
+import GrantDetails from './Modals/GrantDetailsLegacy.vue';
 
 export default {
   components: {
