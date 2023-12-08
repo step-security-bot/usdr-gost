@@ -34,3 +34,28 @@ updates:
     directory: "/terraform/modules/scheduled_ecs_task"
     schedule:
       interval: "daily"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /packages/client
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /packages/e2e
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /packages/server
+    schedule:
+      interval: daily
